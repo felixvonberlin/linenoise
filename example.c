@@ -29,16 +29,10 @@ int main(int argc, char **argv) {
     while(argc > 1) {
         argc--;
         argv++;
-        if (!strcmp(*argv,"--multiline")) {
-            linenoiseSetMultiLine(1);
-            printf("Multi-line mode enabled.\n");
-        } else if (!strcmp(*argv,"--keycodes")) {
-            linenoisePrintKeyCodes();
-            exit(0);
-        } else if (!strcmp(*argv,"--async")) {
+        if (!strcmp(*argv,"--async")) {
             async = 1;
         } else {
-            fprintf(stderr, "Usage: %s [--multiline] [--keycodes] [--async]\n", prgname);
+            fprintf(stderr, "Usage: %s [--async]\n", prgname);
             exit(1);
         }
     }
@@ -111,10 +105,6 @@ int main(int argc, char **argv) {
             /* The "/historylen" command will change the history len. */
             int len = atoi(line+11);
             linenoiseHistorySetMaxLen(len);
-        } else if (!strncmp(line, "/mask", 5)) {
-            linenoiseMaskModeEnable();
-        } else if (!strncmp(line, "/unmask", 7)) {
-            linenoiseMaskModeDisable();
         } else if (line[0] == '/') {
             printf("Unreconized command: %s\n", line);
         }

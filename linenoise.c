@@ -125,12 +125,10 @@ static linenoiseHintsCallback *hintsCallback = NULL;
 static linenoiseFreeHintsCallback *freeHintsCallback = NULL;
 static char *linenoiseNoTTY(void);
 static void refreshLineWithCompletion(struct linenoiseState *ls, linenoiseCompletions *lc, int flags);
-static void refreshLineWithFlags(struct linenoiseState *l, int flags);
+static void internal_refresh(struct linenoiseState *l, int flags);
 
 static struct termios orig_termios; /* In order to restore at exit.*/
-static int maskmode = 0; /* Show "***" instead of input. For passwords. */
 static int rawmode = 0; /* For atexit() function to check if restore is needed*/
-static int mlmode = 0;  /* Multi line mode. Default is single line. */
 static int atexit_registered = 0; /* Register atexit just 1 time. */
 static int history_max_len = LINENOISE_DEFAULT_HISTORY_MAX_LEN;
 static int history_len = 0;
@@ -186,23 +184,6 @@ FILE *lndebug_fp = NULL;
 
 /* ======================= Low level terminal handling ====================== */
 
-/* Enable "mask mode". When it is enabled, instead of the input that
- * the user is typing, the terminal will just display a corresponding
- * number of asterisks, like "****". This is useful for passwords and other
- * secrets that should not be displayed. */
-void linenoiseMaskModeEnable(void) {
-    maskmode = 1;
-}
-
-/* Disable mask mode. */
-void linenoiseMaskModeDisable(void) {
-    maskmode = 0;
-}
-
-/* Set if to use or not the multi line mode. */
-void linenoiseSetMultiLine(int ml) {
-    mlmode = ml;
-}
 
 /* Return true if the terminal name is in the list of terminals we know are
  * not able to understand basic escape sequences. */
@@ -362,12 +343,12 @@ static void refreshLineWithCompletion(struct linenoiseState *ls, linenoiseComple
         struct linenoiseState saved = *ls;
         ls->len = ls->pos = strlen(lc->cvec[ls->completion_idx]);
         ls->buf = lc->cvec[ls->completion_idx];
-        refreshLineWithFlags(ls,flags);
+        internal_refresh(ls, flags);
         ls->len = saved.len;
         ls->pos = saved.pos;
         ls->buf = saved.buf;
     } else {
-        refreshLineWithFlags(ls,flags);
+        internal_refresh(ls,flags);
     }
 
     /* Free the completions table if needed. */
@@ -530,62 +511,6 @@ void refreshShowHints(struct abuf *ab, struct linenoiseState *l, int plen) {
     }
 }
 
-/* Single line low level line refresh.
- *
- * Rewrite the currently edited line accordingly to the buffer content,
- * cursor position, and number of columns of the terminal.
- *
- * Flags is REFRESH_* macros. The function can just remove the old
- * prompt, just write it, or both. */
-static void refreshSingleLine(struct linenoiseState *l, int flags) {
-    char seq[64];
-    size_t plen = strlen(l->prompt);
-    int fd = l->ofd;
-    char *buf = l->buf;
-    size_t len = l->len;
-    size_t pos = l->pos;
-    struct abuf ab;
-
-    while((plen+pos) >= l->cols) {
-        buf++;
-        len--;
-        pos--;
-    }
-    while (plen+len > l->cols) {
-        len--;
-    }
-
-    abInit(&ab);
-    /* Cursor to left edge */
-    snprintf(seq,sizeof(seq),"\r");
-    abAppend(&ab,seq,strlen(seq));
-
-    if (flags & REFRESH_WRITE) {
-        /* Write the prompt and the current buffer content */
-        abAppend(&ab,l->prompt,strlen(l->prompt));
-        if (maskmode == 1) {
-            while (len--) abAppend(&ab,"*",1);
-        } else {
-            abAppend(&ab,buf,len);
-        }
-        /* Show hits if any. */
-        refreshShowHints(&ab,l,plen);
-    }
-
-    /* Erase to right */
-    snprintf(seq,sizeof(seq),"\x1b[0K");
-    abAppend(&ab,seq,strlen(seq));
-
-    if (flags & REFRESH_WRITE) {
-        /* Move cursor to original position. */
-        snprintf(seq,sizeof(seq),"\r\x1b[%dC", (int)(pos+plen));
-        abAppend(&ab,seq,strlen(seq));
-    }
-
-    if (write(fd,ab.b,ab.len) == -1) {} /* Can't recover from write error. */
-    abFree(&ab);
-}
-
 /* Multi line low level line refresh.
  *
  * Rewrite the currently edited line accordingly to the buffer content,
@@ -593,7 +518,7 @@ static void refreshSingleLine(struct linenoiseState *l, int flags) {
  *
  * Flags is REFRESH_* macros. The function can just remove the old
  * prompt, just write it, or both. */
-static void refreshMultiLine(struct linenoiseState *l, int flags) {
+static void internal_refresh(struct linenoiseState *l, int flags) {
     char seq[64];
     int plen = strlen(l->prompt);
     int rows = (plen+l->len+l->cols-1)/l->cols; /* rows used by current buf. */
@@ -608,7 +533,9 @@ static void refreshMultiLine(struct linenoiseState *l, int flags) {
 
     /* First step: clear all the lines used before. To do so start by
      * going to the last row. */
-    abInit(&ab);
+    unsigned int i;
+    for (i = 0; i < l->len; i++) abAppend(&ab,"*",1);
+
 
     if (flags & REFRESH_CLEAN) {
         if (old_rows-rpos > 0) {
@@ -634,13 +561,8 @@ static void refreshMultiLine(struct linenoiseState *l, int flags) {
 
     if (flags & REFRESH_WRITE) {
         /* Write the prompt and the current buffer content */
-        abAppend(&ab,l->prompt,strlen(l->prompt));
-        if (maskmode == 1) {
-            unsigned int i;
-            for (i = 0; i < l->len; i++) abAppend(&ab,"*",1);
-        } else {
-            abAppend(&ab,l->buf,l->len);
-        }
+
+        abAppend(&ab,l->buf,l->len);
 
         /* Show hits if any. */
         refreshShowHints(&ab,l,plen);
@@ -687,26 +609,15 @@ static void refreshMultiLine(struct linenoiseState *l, int flags) {
     abFree(&ab);
 }
 
-/* Calls the two low level functions refreshSingleLine() or
- * refreshMultiLine() according to the selected mode. */
-static void refreshLineWithFlags(struct linenoiseState *l, int flags) {
-    if (mlmode)
-        refreshMultiLine(l,flags);
-    else
-        refreshSingleLine(l,flags);
-}
 
 /* Utility function to avoid specifying REFRESH_ALL all the times. */
 static void refreshLine(struct linenoiseState *l) {
-    refreshLineWithFlags(l,REFRESH_ALL);
+    internal_refresh(l,REFRESH_ALL);
 }
 
 /* Hide the current line, when using the multiplexing API. */
 void linenoiseHide(struct linenoiseState *l) {
-    if (mlmode)
-        refreshMultiLine(l,REFRESH_CLEAN);
-    else
-        refreshSingleLine(l,REFRESH_CLEAN);
+        internal_refresh(l,REFRESH_CLEAN);
 }
 
 /* Show the current line, when using the multiplexing API. */
@@ -714,7 +625,7 @@ void linenoiseShow(struct linenoiseState *l) {
     if (l->in_completion) {
         refreshLineWithCompletion(l,NULL,REFRESH_WRITE);
     } else {
-        refreshLineWithFlags(l,REFRESH_WRITE);
+        internal_refresh(l,REFRESH_WRITE);
     }
 }
 
@@ -728,14 +639,7 @@ int linenoiseEditInsert(struct linenoiseState *l, char c) {
             l->pos++;
             l->len++;
             l->buf[l->len] = '\0';
-            if ((!mlmode && l->plen+l->len < l->cols && !hintsCallback)) {
-                /* Avoid a full update of the line in the
-                 * trivial case. */
-                char d = (maskmode==1) ? '*' : c;
-                if (write(l->ofd,&d,1) == -1) return -1;
-            } else {
-                refreshLine(l);
-            }
+            refreshLine(l);
         } else {
             memmove(l->buf+l->pos+1,l->buf+l->pos,l->len-l->pos);
             l->buf[l->pos] = c;
@@ -952,7 +856,7 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
     case ENTER:    /* enter */
         history_len--;
         free(history[history_len]);
-        if (mlmode) linenoiseEditMoveEnd(l);
+        linenoiseEditMoveEnd(l);
         if (hintsCallback) {
             /* Force a refresh without hints to leave the previous
              * line as the user typed it after a newline. */
@@ -1115,34 +1019,6 @@ static char *linenoiseBlockingEdit(int stdin_fd, int stdout_fd, char *buf, size_
     while((res = linenoiseEditFeed(&l)) == linenoiseEditMore);
     linenoiseEditStop(&l);
     return res;
-}
-
-/* This special mode is used by linenoise in order to print scan codes
- * on screen for debugging / development purposes. It is implemented
- * by the linenoise_example program using the --keycodes option. */
-void linenoisePrintKeyCodes(void) {
-    char quit[4];
-
-    printf("Linenoise key codes debugging mode.\n"
-            "Press keys to see scan codes. Type 'quit' at any time to exit.\n");
-    if (enableRawMode(STDIN_FILENO) == -1) return;
-    memset(quit,' ',4);
-    while(1) {
-        char c;
-        int nread;
-
-        nread = read(STDIN_FILENO,&c,1);
-        if (nread <= 0) continue;
-        memmove(quit,quit+1,sizeof(quit)-1); /* shift string to left. */
-        quit[sizeof(quit)-1] = c; /* Insert current char on the right. */
-        if (memcmp(quit,"quit",sizeof(quit)) == 0) break;
-
-        printf("'%c' %02x (%d) (type quit to exit)\n",
-            isprint(c) ? c : '?', (int)c, (int)c);
-        printf("\r"); /* Go left edge manually, we are in raw mode. */
-        fflush(stdout);
-    }
-    disableRawMode(STDIN_FILENO);
 }
 
 /* This function is called when linenoise() is called with the standard
