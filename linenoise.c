@@ -119,6 +119,18 @@
 
 #define LINENOISE_DEFAULT_HISTORY_MAX_LEN 100
 #define LINENOISE_MAX_LINE 4096
+#define LIST_MAX(argc, argv, maxlen) 											\
+			do {																\
+				maxlen = 0;														\
+				size_t lmbuflen;												\
+				for (int i = 0; i < argc; i++) {								\
+					lmbuflen = strlen(argv[i]);									\
+					if (lmbuflen > maxlen) {									\
+						maxlen = lmbuflen;										\
+					}															\
+				}																\
+			} while (0)
+
 static char *unsupported_term[] = {"dumb","cons25","emacs",NULL};
 static linenoiseCompletionCallback *completionCallback = NULL;
 static linenoiseHintsCallback *hintsCallback = NULL;
@@ -376,6 +388,7 @@ static void refreshLineWithCompletion(struct linenoiseState *ls, linenoiseComple
 			bufbuf += nwritten;
 			buflen -= nwritten;
 		}
+
 		nwritten = snprintf(bufbuf, buflen, "\x1b[%dA\x1b[0m",i+2);
 		bufbuf += nwritten;
 		buflen -= nwritten;
@@ -417,7 +430,27 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
         linenoiseBeep();
         ls->in_completion = 0;
     } else {
-        switch(c) {
+		
+		char my_bool = 0, max_comp = 0;
+		size_t maxlen = 0;
+		LIST_MAX(lc.len, lc.cvec, maxlen);
+		for (int i = 1; i < maxlen; i++) {
+			my_bool = 0;
+			for (int j = 0; j < lc.len; j++) {
+				if (strncmp(lc.cvec[j], lc.cvec[(j + 1) % lc.len], i)) {
+					my_bool = 1;
+				}
+			}
+			if (!my_bool) {
+				max_comp = i;
+			}
+		}
+		if (max_comp) {
+			nwritten = snprintf(ls->buf, ls->buflen, "%.*s", max_comp, lc.cvec[0]);
+			ls->len = ls->pos = nwritten;
+
+		}
+		switch(c) {
             case '\t':
                 if (ls->in_completion == 0) {
                     ls->in_completion = 1;
@@ -531,7 +564,7 @@ void refreshShowHints(struct abuf *ab, struct linenoiseState *l, int plen) {
         if (hint) {
             int hintlen = strlen(hint);
             int hintmaxlen = l->cols-(plen+l->len);
-            if (hintlen > hintmaxlen) hintlen = hintmaxlen;
+            //if (hintlen > hintmaxlen) hintlen = hintmaxlen;
             if (bold == 1 && color == -1) color = 37;
             if (color != -1 || bold != 0)
                 snprintf(seq,64,"\033[%d;%d;49m",bold,color);
@@ -543,9 +576,11 @@ void refreshShowHints(struct abuf *ab, struct linenoiseState *l, int plen) {
                 abAppend(ab,"\033[0m",4);
                 
             //TODO speichersicheriheit!
-            for (i=0; hint[i]; hint[i]=='\n' ? i++ : *hint++);            snprintf(seq,64, "\x1b[%dA", i);
-            abAppend(ab, seq, strlen(seq));
-         
+            for (i=0; hint[i]; hint[i]=='\n' ? i++ : *hint++);
+            if (i > 0) {
+				snprintf(seq,64, "\x1b[%dA", i);
+				abAppend(ab, seq, strlen(seq));
+			}
             /* Call the function to free the hint returned. */
             if (freeHintsCallback) freeHintsCallback(hint);
         }
@@ -614,19 +649,9 @@ static void internal_refresh(struct linenoiseState *l, int flags) {
         rpos2 = (plen+l->pos+l->cols)/l->cols; /* Current cursor relative row */
         lndebug("rpos2 %d", rpos2);
 
-        /* Go up till we reach the expected positon. */
-        if (rows-rpos2 > 0) {
-            lndebug("go-up %d", rows-rpos2);
-            snprintf(seq,64,"\x1b[%dA", rows-rpos2);
-            abAppend(&ab,seq,strlen(seq));
-        }
-
         /* Set column. */
         col = (plen+(int)l->pos) % (int)l->cols;
-        //col = (utf8_strlen(l->prompt) + utf8_strlen(l->buf)) % (int)l->cols;
-        //printf("pos vs len %d ß %d\r\n", l->pos, utf8_strlen(l->buf));
         lndebug("set col %d", 1+col);
-		
         if (col)
             snprintf(seq,64,"\r\x1b[%dC", col);
         else
@@ -667,10 +692,10 @@ void linenoiseShow(struct linenoiseState *l) {
 int linenoiseEditInsert(struct linenoiseState *l, char c) {
     if (l->len < l->buflen) {
         if (l->len == l->pos) {
-            l->buf[l->pos++] = c;
-            l->buf[++l->len] = '\0';
-            //l->pos++;
-            //l->len += utf8_strlen(l->buf[l->len-3]-3);
+            l->buf[l->pos] = c;
+            l->len++;
+            l->pos++;
+            l->buf[l->len] = '\0';
             refreshLine(l);
         } else {
             memmove(l->buf+l->pos+1,l->buf+l->pos,l->len-l->pos);
@@ -780,6 +805,7 @@ void linenoiseEditDeletePrevWord(struct linenoiseState *l) {
     refreshLine(l);
 }
 
+
 /* This function is part of the multiplexed API of Linenoise, that is used
  * in order to implement the blocking variant of the API but can also be
  * called by the user directly in an event driven program. It will:
@@ -871,8 +897,8 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
     char seq[3];
 
     nread = read(l->ifd,&c,1);
+    
     if (nread <= 0) return NULL;
-
     /* Only autocomplete when the callback is set. It returns < 0 when
      * there was an error reading from fd. Otherwise it will return the
      * character that should be handled next. */
