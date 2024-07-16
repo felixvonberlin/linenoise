@@ -182,6 +182,18 @@ FILE *lndebug_fp = NULL;
 #define lndebug(fmt, ...)
 #endif
 
+/*
+int
+utf8_strlen(const char *utf8_str) {
+  int len = 0;
+  while (*utf8_str) {
+    if ((*utf8_str & 0xC0) != 0x80) len++ ;
+    utf8_str++;
+  }
+  return len;
+}
+*/
+
 /* ======================= Low level terminal handling ====================== */
 
 
@@ -337,9 +349,13 @@ static void refreshLineWithCompletion(struct linenoiseState *ls, linenoiseComple
         completionCallback(ls->buf,&ctable);
         lc = &ctable;
     }
+    char *bufbuf;
+    int buflen = ls->buflen;
+    int nwritten, i;
 
     /* Show the edited line with completion if possible, or just refresh. */
-    if (ls->completion_idx < lc->len) {
+    if (lc->len == 1) {
+    //if (ls->completion_idx < lc->len) {
         struct linenoiseState saved = *ls;
         ls->len = ls->pos = strlen(lc->cvec[ls->completion_idx]);
         ls->buf = lc->cvec[ls->completion_idx];
@@ -347,7 +363,29 @@ static void refreshLineWithCompletion(struct linenoiseState *ls, linenoiseComple
         ls->len = saved.len;
         ls->pos = saved.pos;
         ls->buf = saved.buf;
-    } else {
+    } else if (lc->len > 1) {
+		// show available commands
+		struct linenoiseState saved = *ls;
+		bufbuf = ls->buf+ls->pos;
+		buflen = ls->buflen;
+		nwritten = snprintf(bufbuf, ls->buflen, "\x1b[34m\r\navailable commands:\r\n");
+		bufbuf += nwritten;
+		buflen -= nwritten;
+		for (i = 0; i < lc->len; i++) {
+			nwritten = snprintf(bufbuf, buflen, "\t%s\r\n", lc->cvec[i]);
+			bufbuf += nwritten;
+			buflen -= nwritten;
+		}
+		nwritten = snprintf(bufbuf, buflen, "\x1b[%dA\x1b[0m",i+2);
+		bufbuf += nwritten;
+		buflen -= nwritten;
+		ls->len = bufbuf - ls->buf;
+		internal_refresh(ls, flags);
+		ls->len = saved.pos;
+        ls->pos = saved.pos;
+        ls->buf = saved.buf;
+
+	} else {
         internal_refresh(ls,flags);
     }
 
@@ -380,14 +418,11 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
         ls->in_completion = 0;
     } else {
         switch(c) {
-            case 9: /* tab */
+            case '\t':
                 if (ls->in_completion == 0) {
                     ls->in_completion = 1;
-                    ls->completion_idx = 0;
-                } else {
-                    ls->completion_idx = (ls->completion_idx+1) % (lc.len+1);
-                    if (ls->completion_idx == lc.len) linenoiseBeep();
-                }
+				}
+                ls->completion_idx = 0;
                 c = 0;
                 break;
             case 27: /* escape */
@@ -489,6 +524,7 @@ static void abFree(struct abuf *ab) {
  * to the right of the prompt. */
 void refreshShowHints(struct abuf *ab, struct linenoiseState *l, int plen) {
     char seq[64];
+    int i;
     if (hintsCallback && plen+l->len < l->cols) {
         int color = -1, bold = 0;
         char *hint = hintsCallback(l->buf,&color,&bold);
@@ -505,11 +541,17 @@ void refreshShowHints(struct abuf *ab, struct linenoiseState *l, int plen) {
             abAppend(ab,hint,hintlen);
             if (color != -1 || bold != 0)
                 abAppend(ab,"\033[0m",4);
+                
+            //TODO speichersicheriheit!
+            for (i=0; hint[i]; hint[i]=='\n' ? i++ : *hint++);            snprintf(seq,64, "\x1b[%dA", i);
+            abAppend(ab, seq, strlen(seq));
+         
             /* Call the function to free the hint returned. */
             if (freeHintsCallback) freeHintsCallback(hint);
         }
     }
 }
+
 
 /* Multi line low level line refresh.
  *
@@ -533,23 +575,10 @@ static void internal_refresh(struct linenoiseState *l, int flags) {
 
     /* First step: clear all the lines used before. To do so start by
      * going to the last row. */
-    unsigned int i;
-    for (i = 0; i < l->len; i++) abAppend(&ab,"*",1);
-
-
+    abInit(&ab);
     if (flags & REFRESH_CLEAN) {
-        if (old_rows-rpos > 0) {
-            lndebug("go down %d", old_rows-rpos);
-            snprintf(seq,64,"\x1b[%dB", old_rows-rpos);
+            snprintf(seq,64,"\r\x1b[0J");
             abAppend(&ab,seq,strlen(seq));
-        }
-
-        /* Now for every row clear it, go up. */
-        for (j = 0; j < old_rows-1; j++) {
-            lndebug("clear+up");
-            snprintf(seq,64,"\r\x1b[0K\x1b[1A");
-            abAppend(&ab,seq,strlen(seq));
-        }
     }
 
     if (flags & REFRESH_ALL) {
@@ -561,7 +590,7 @@ static void internal_refresh(struct linenoiseState *l, int flags) {
 
     if (flags & REFRESH_WRITE) {
         /* Write the prompt and the current buffer content */
-
+		abAppend(&ab,l->prompt,strlen(l->prompt));
         abAppend(&ab,l->buf,l->len);
 
         /* Show hits if any. */
@@ -594,7 +623,10 @@ static void internal_refresh(struct linenoiseState *l, int flags) {
 
         /* Set column. */
         col = (plen+(int)l->pos) % (int)l->cols;
+        //col = (utf8_strlen(l->prompt) + utf8_strlen(l->buf)) % (int)l->cols;
+        //printf("pos vs len %d ß %d\r\n", l->pos, utf8_strlen(l->buf));
         lndebug("set col %d", 1+col);
+		
         if (col)
             snprintf(seq,64,"\r\x1b[%dC", col);
         else
@@ -635,10 +667,10 @@ void linenoiseShow(struct linenoiseState *l) {
 int linenoiseEditInsert(struct linenoiseState *l, char c) {
     if (l->len < l->buflen) {
         if (l->len == l->pos) {
-            l->buf[l->pos] = c;
-            l->pos++;
-            l->len++;
-            l->buf[l->len] = '\0';
+            l->buf[l->pos++] = c;
+            l->buf[++l->len] = '\0';
+            //l->pos++;
+            //l->len += utf8_strlen(l->buf[l->len-3]-3);
             refreshLine(l);
         } else {
             memmove(l->buf+l->pos+1,l->buf+l->pos,l->len-l->pos);
@@ -961,6 +993,7 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
         }
         break;
     default:
+    	if (c == '\t') break;
         if (linenoiseEditInsert(l,c)) return NULL;
         break;
     case CTRL_U: /* Ctrl+u, delete the whole line. */

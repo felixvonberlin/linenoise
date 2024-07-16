@@ -3,19 +3,23 @@
 #include <string.h>
 #include <sys/select.h>
 #include "linenoise.h"
+#define MIN(a,b) (((a)<(b))?(a):(b))
 
 void completion(const char *buf, linenoiseCompletions *lc) {
-    if (buf[0] == 'h') {
-        linenoiseAddCompletion(lc,"hello");
+    if (!strncmp(buf, "ciao", strlen(buf)))
+        linenoiseAddCompletion(lc,"ciao");
+    if (!strncmp(buf, "hello there", strlen(buf)))
         linenoiseAddCompletion(lc,"hello there");
-    }
+    if (!strncmp(buf, "hello", strlen(buf)))
+        linenoiseAddCompletion(lc,"hello");
+    
 }
 
 char *hints(const char *buf, int *color, int *bold) {
     if (!strcasecmp(buf,"hello")) {
         *color = 35;
         *bold = 0;
-        return " World";
+        return " World\r\nMundo\r\nWelt\r\nМир\r\n";
     }
     return NULL;
 }
@@ -25,7 +29,6 @@ int main(int argc, char **argv) {
     char *prgname = argv[0];
     int async = 0;
 
-    /* Parse options, with --multiline we enable multi line editing. */
     while(argc > 1) {
         argc--;
         argv++;
