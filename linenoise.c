@@ -119,17 +119,6 @@
 
 #define LINENOISE_DEFAULT_HISTORY_MAX_LEN 100
 #define LINENOISE_MAX_LINE 4096
-#define LIST_MAX(argc, argv, maxlen) 											\
-			do {																\
-				maxlen = 0;														\
-				size_t lmbuflen;												\
-				for (int i = 0; i < argc; i++) {								\
-					lmbuflen = strlen(argv[i]);									\
-					if (lmbuflen > maxlen) {									\
-						maxlen = lmbuflen;										\
-					}															\
-				}																\
-			} while (0)
 
 static char *unsupported_term[] = {"dumb","cons25","emacs",NULL};
 static linenoiseCompletionCallback *completionCallback = NULL;
@@ -430,7 +419,6 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
         linenoiseBeep();
         ls->in_completion = 0;
     } else {
-		
 		char my_bool = 0, max_comp = 0;
 		size_t maxlen = 0;
 		LIST_MAX(lc.len, lc.cvec, maxlen);
@@ -448,7 +436,6 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
 		if (max_comp) {
 			nwritten = snprintf(ls->buf, ls->buflen, "%.*s", max_comp, lc.cvec[0]);
 			ls->len = ls->pos = nwritten;
-
 		}
 		switch(c) {
             case '\t':
@@ -561,6 +548,7 @@ void refreshShowHints(struct abuf *ab, struct linenoiseState *l, int plen) {
     if (hintsCallback && plen+l->len < l->cols) {
         int color = -1, bold = 0;
         char *hint = hintsCallback(l->buf,&color,&bold);
+        char *hint1 = hint;
         if (hint) {
             int hintlen = strlen(hint);
             int hintmaxlen = l->cols-(plen+l->len);
@@ -575,8 +563,7 @@ void refreshShowHints(struct abuf *ab, struct linenoiseState *l, int plen) {
             if (color != -1 || bold != 0)
                 abAppend(ab,"\033[0m",4);
                 
-            //TODO speichersicheriheit!
-            for (i=0; hint[i]; hint[i]=='\n' ? i++ : *hint++);
+            for (i = 0; hint1[i]; hint1[i]=='\n' ? i++ : *hint1++);
             if (i > 0) {
 				snprintf(seq,64, "\x1b[%dA", i);
 				abAppend(ab, seq, strlen(seq));
