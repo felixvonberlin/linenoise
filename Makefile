@@ -28,15 +28,13 @@ install: all
 	install --directory $(PREFIX)/lib $(PREFIX)/include
 	install lib$(LIBNAME).so.$(VERSION_MAJOR) lib$(LIBNAME).a $(PREFIX)/lib/
 	ln -fs $(PREFIX)/lib/lib$(LIBNAME).so.$(VERSION_MAJOR) $(PREFIX)/lib/lib$(LIBNAME).so
-	install yuarel.h $(PREFIX)/include/
+	install linenoise.h $(PREFIX)/include/
 	ldconfig -n $(PREFIX)/lib
 
 %.o: %.c
 	$(CC) $(CFLAGS) $< -o $@
 
-linenoise_example: linenoise.h linenoise.c
-
-linenoise_example: linenoise.c example.c
+linenoise_example: linenoise.o example.c
 	$(CC) -Wall -W -Os -g -o linenoise_example linenoise.c example.c
 
 .PHONY: clean
