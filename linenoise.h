@@ -106,18 +106,6 @@ void linenoisePrintKeyCodes(void);
 void linenoiseMaskModeEnable(void);
 void linenoiseMaskModeDisable(void);
 
-#define LIST_MAX(argc, argv, maxlen) 											\
-			do {																\
-				maxlen = 0;														\
-				size_t lmbuflen;												\
-				for (int i = 0; i < argc; i++) {								\
-					lmbuflen = strlen(argv[i]);									\
-					if (lmbuflen > maxlen) {									\
-						maxlen = lmbuflen;										\
-					}															\
-				}																\
-			} while (0)
-
 
 #ifdef __cplusplus
 }

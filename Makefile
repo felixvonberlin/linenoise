@@ -20,7 +20,7 @@ all: linenoise
 .PHONY: linenoise
 linenoise: $(SRC_FILES) $(OBJ_FILES)
 	@echo "Building $(PKG_NAME)..."
-	$(CC) $(LDFLAGS) $(OBJ_FILES) -o lib$(LIBNAME).so.$(VERSION_MAJOR)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJ_FILES) -o lib$(LIBNAME).so.$(VERSION_MAJOR)
 	$(AR) rcs lib$(LIBNAME).a $(OBJ_FILES)
 	
 .PHONY: install
