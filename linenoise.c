@@ -124,7 +124,7 @@
 			do {																\
 				maxlen = 0;														\
 				size_t lmbuflen;												\
-				for (int i = 0; i < argc; i++) {								\
+				for (size_t i = 0; i < argc; i++) {								\
 					lmbuflen = strlen(argv[i]);									\
 					if (lmbuflen > maxlen) {									\
 						maxlen = lmbuflen;										\
@@ -383,7 +383,7 @@ static void refreshLineWithCompletion(struct linenoiseState *ls, linenoiseComple
 		nwritten = snprintf(bufbuf, ls->buflen, "\x1b[34m\r\navailable commands:\r\n");
 		bufbuf += nwritten;
 		buflen -= nwritten;
-		for (i = 0; i < lc->len; i++) {
+		for (i = 0; (size_t)i < lc->len; i++) {
 			nwritten = snprintf(bufbuf, buflen, "\t%s\r\n", lc->cvec[i]);
 			bufbuf += nwritten;
 			buflen -= nwritten;
@@ -433,9 +433,9 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
 		char my_bool = 0, max_comp = 0;
 		size_t maxlen = 0;
 		LIST_MAX(lc.len, lc.cvec, maxlen);
-		for (int i = 1; i < maxlen; i++) {
+		for (size_t i = 1; i < maxlen; i++) {
 			my_bool = 0;
-			for (int j = 0; j < lc.len; j++) {
+			for (size_t j = 0; j < lc.len; j++) {
 				if (strncmp(lc.cvec[j], lc.cvec[(j + 1) % lc.len], i)) {
 					my_bool = 1;
 				}
